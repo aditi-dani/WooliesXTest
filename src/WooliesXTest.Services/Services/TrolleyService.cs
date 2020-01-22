@@ -6,13 +6,8 @@ using WooliesXTest.Data.ViewModels;
 
 namespace WooliesXTest.Services.Services
 {
-    public interface ITrolleyService
-    {
-        Task<decimal> CalculateTrolleyTotal(TrolleyRequest trolley);
-    }
-
     public class TrolleyService : ITrolleyService
-    { 
+    {
         /// <summary>
         /// This method is an implementation of the WooliesX trolleyTotal end point
         /// </summary>
@@ -27,48 +22,47 @@ namespace WooliesXTest.Services.Services
 
             var products = (from p in trolleyProducts
                             join q in trolleyQuantities on p.Name equals q.Name
-                            select new TrolleyProduct { Name = p.Name, Price = p.Price, Quantity = q.Quantity, QuantityLeft = q.Quantity }).ToList();
+                            select new TrolleyProduct { Name = p.Name, Price = p.Price, Quantity = q.Quantity }).ToList();
 
-            // loop through all specials in the trolley request and compute the benefits
-            // here benefit = total value of products without any special applied - applicable special value
-            // we then find the special with highest benefit and use that for calculating the trolley total
+
             if (trolleySpecials != null && trolleySpecials.Any())
             {
                 foreach (var special in trolleySpecials)
                 {
-                    var totalPrice = (from p in products
-                                      join pq in special.Quantities on p.Name equals pq.Name
-                                      group new { p, pq } by p.Name
+                    var totalPrice = (from tp in products
+                                      join sp in special.Quantities on tp.Name equals sp.Name
+                                      group new { tp, sp } by tp.Name
                                             into productQtyGroup
-                                      select productQtyGroup.Sum(x => x.p.Price * x.pq.Quantity)).Sum();
+                                      select productQtyGroup.Sum(x => x.tp.Price * x.sp.Quantity)).Sum();
 
                     special.TotalBenefit = totalPrice - special.Total;
                 }
 
-                // apply specials recursively by reducing trolley product quantities
-                // do this until no more specials can be applied
-                var result = GetApplicableSpecials(products, trolleySpecials);
+                var result = GetApplicableSpecials(products?.ToDictionary(x => x.Name), trolleySpecials);
 
-                if(result != null && result.Any())
+                if (result != null && result.Any())
                 {
                     applicableSpecials.AddRange(result);
                 }
             }
 
-            return ((applicableSpecials?.Sum(x => x.Total) ?? 0) + products.Sum(p => p.QuantityLeft * p.Price));
+            return ((applicableSpecials?.Sum(x => x.Total) ?? 0) + products.Sum(p => p.Quantity * p.Price));
         }
 
-        private List<Special> GetApplicableSpecials(List<TrolleyProduct> products, List<Special> specials)
+        private static List<Special> GetApplicableSpecials(IReadOnlyDictionary<string, TrolleyProduct> productDisDictionary, IEnumerable<Special> specials)
         {
             var applicableSpecials = new List<Special>();
-            var selectedSpecials = new List<Special>();
+            var allApplicableSpecials = new List<Special>();
 
             foreach (var special in specials.Where(x => x.TotalBenefit > 0))
             {
                 var apply = true;
+
                 foreach (var productQuantity in special.Quantities)
                 {
-                    if (products.All(x => x.Name != productQuantity.Name || (x.QuantityLeft < productQuantity.Quantity)))
+                    bool isTrollyProductExist = productDisDictionary.TryGetValue(productQuantity.Name, out TrolleyProduct trolleyProduct);
+
+                    if (isTrollyProductExist == false || trolleyProduct == null || trolleyProduct.Quantity < productQuantity.Quantity)
                     {
                         apply = false;
                         break;
@@ -77,29 +71,35 @@ namespace WooliesXTest.Services.Services
 
                 if (apply)
                 {
-                    applicableSpecials.Add(special);
+                    allApplicableSpecials.Add(special);
                 }
             }
 
-            if (applicableSpecials.Any())
+            if (allApplicableSpecials.Any())
             {
-                var selectedSpecial = applicableSpecials.OrderByDescending(x => x.TotalBenefit).FirstOrDefault();
+                var selectedSpecial = allApplicableSpecials.OrderByDescending(x => x.TotalBenefit).FirstOrDefault();
 
-                selectedSpecials.Add(selectedSpecial);
+                applicableSpecials.Add(selectedSpecial);
 
-                foreach (var productQuantity in selectedSpecial?.Quantities)
-                {
-                    var product = products.FirstOrDefault(x => x.Name == productQuantity.Name);
-                    if (product != null)
-                    {
-                        product.QuantityLeft = product.QuantityLeft - productQuantity.Quantity;
-                    }
-                }
+                ApplySpecialToTrolley(productDisDictionary, selectedSpecial);
 
-                selectedSpecials.AddRange(GetApplicableSpecials(products, specials));
+                applicableSpecials.AddRange(GetApplicableSpecials(productDisDictionary, specials));
             }
 
-            return selectedSpecials;
+            return applicableSpecials;
+        }
+
+        private static void ApplySpecialToTrolley(IReadOnlyDictionary<string, TrolleyProduct> productDisDictionary, Special special)
+        {
+            foreach (var productQuantity in special?.Quantities)
+            {
+                productDisDictionary.TryGetValue(productQuantity.Name, out var trolleyProduct);
+
+                if (trolleyProduct != null)
+                {
+                    trolleyProduct.Quantity -= productQuantity.Quantity;
+                }
+            }
         }
     }
 }

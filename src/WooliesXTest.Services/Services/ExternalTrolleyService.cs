@@ -20,10 +20,10 @@ namespace WooliesXTest.Services.Services
         /// </summary>
         /// <param name="trolleyRequest"></param>
         /// <returns></returns>
-        public async Task<decimal> CalculateTrolleyTotal(TrolleyRequest trolley)
+        public async Task<decimal> CalculateTrolleyTotal(TrolleyRequest trolleyRequest)
         {
 
-            var content = new StringContent(JsonConvert.SerializeObject(trolley), Encoding.UTF8, "application/json");
+            var content = new StringContent(JsonConvert.SerializeObject(trolleyRequest), Encoding.UTF8, "application/json");
             var httpResponse = await _client.PostAsync($"resource/trolleyCalculator", content);
             var products = await httpResponse.Content.ReadAsAsync<decimal>();
             return products;
